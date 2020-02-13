@@ -19,15 +19,18 @@ import com.microsoft.azure.documentdb.bulkexecutor.DocumentBulkExecutor;
 import com.microsoft.azure.documentdb.bulkexecutor.DocumentBulkExecutor.Builder;
 
 import java.io.IOException;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 
 public class Program {
 
     private DocumentClient client;
     private Stopwatch totalWatch = Stopwatch.createUnstarted();
-    private int OFFER_THROUGHPUT = 10000;
+    private int OFFER_THROUGHPUT = 100000;
     /**
      * Run a Hello DocumentDB console application.
      *
@@ -48,12 +51,16 @@ public class Program {
     private void cosmosDbTestCycle() throws  Exception{
         //Parse json doc
         System.out.println("----------------------Parsing json-----------------------");
-        int numOfDocs = 10000;
-        ArrayList<String> documents = JsonReader.generateJsonCollection(numOfDocs,"C:\\Users\\Sparta Global\\Desktop\\trans\\d1.json");
-        ArrayList<String> documents2 = JsonReader.generateJsonCollection(numOfDocs,"C:\\Users\\Sparta Global\\Desktop\\trans\\d2.json");
-
-        System.out.println(documents2.get(0));
-
+        int batchSize = 100000;
+        int numOfBatches = 10;
+        /*ArrayList<String> documents = JsonReader.generateJsonCollection(batchSize,"C:\\Users\\Sparta Global\\Desktop\\trans\\d1.json");
+        ArrayList<String> documents2 = JsonReader.generateJsonCollection(batchSize,"C:\\Users\\Sparta Global\\Desktop\\trans\\d2.json");
+        System.out.println(documents2.get(0));*/
+        //get root dir
+        String root = System.getProperty("user.dir");
+        ArrayList<ArrayList<String>> batch = batchFiles(batchSize, numOfBatches, root + "\\d1.json");
+        ArrayList<ArrayList<String>> batch2 = batchFiles(batchSize, numOfBatches, root + "\\d2.json");
+        System.out.println(batch2.get(1).get(0));
         //set connection to cosmos db
         ConnectionPolicy connectionPolicy = new ConnectionPolicy();
         connectionPolicy.setConnectionMode(ConnectionMode.DirectHttps);
@@ -66,7 +73,6 @@ public class Program {
                 masterKey,
                 connectionPolicy,
                 ConsistencyLevel.Session);
-
 
         String databaseName = "testdb";
         String collectionName = "daily-trans";
@@ -84,29 +90,27 @@ public class Program {
         collection = client.readCollection(collectionLink, null).getResource();
 
         System.out.println("-------------------------Bulk Import---------------------------");
-        executeImport(databaseName,collectionName,collection,documents);
-        System.out.println("-------------------------SQL Query---------------------------");
+        //Non batch
+        //executeImport(databaseName,collectionName,collection,documents);
+        //Batch ver
+        executeImport(databaseName,collectionName,collection,batch);
+
+/*        System.out.println("-------------------------SQL Query---------------------------");
         queryDocuments(collectionLink);
+        System.in.read();*/
+        //changeContainerThroughput(collection, 100000);
         System.in.read();
         System.out.println("-------------------------Bulk Upsert---------------------------");
-        executeUpsert(databaseName,collectionName,collection,documents2);
-        System.out.println("-------------------------SQL Query---------------------------");
+        executeUpsert(databaseName,collectionName,collection,batch2);
+/*        System.out.println("-------------------------SQL Query---------------------------");
         queryDocuments(collectionLink);
-
+*/
         System.in.read();
         //Set throughput back down
-        String collectionResourceId = collection.getResourceId();
-        Iterator<Offer> it = client.queryOffers(
-                String.format("SELECT * FROM r where r.offerResourceId = '%s'", collectionResourceId), null).getQueryIterator();
-        Offer offer = it.next();
-        System.out.println(offer.getContent().getInt("offerThroughput"));
-        // update the offer
-        int newThroughput = 1000;
-        offer.getContent().put("offerThroughput", newThroughput);
-        client.replaceOffer(offer);
+        changeContainerThroughput(collection, 1000);
     }
 
-    private void executeImport(String databaseName, String collectionName, DocumentCollection collection, ArrayList<String> documents) throws Exception {
+/*    private void executeImport(String databaseName, String collectionName, DocumentCollection collection, ArrayList<String> documents) throws Exception {
 
         // Builder pattern
         Builder bulkExecutorBuilder = DocumentBulkExecutor.builder().from(
@@ -124,21 +128,52 @@ public class Program {
         client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(0);
 
         BulkImportResponse bulkImportResponse = null;
-        totalWatch.start();
         bulkImportResponse = bulkExecutor.importAll(documents, false, true, null);
-        totalWatch.stop();
         System.out.println( String.format("Files imported: %s", bulkImportResponse.getNumberOfDocumentsImported()));
         System.out.println("Bad Input File: " + bulkImportResponse.getBadInputDocuments().size());
         System.out.println( String.format("Import time: %s milliseconds", bulkImportResponse.getTotalTimeTaken().toMillis()));
-        System.out.println(String.format("Total Import time measured by stopwatch: %s milliseconds", totalWatch.elapsed().toMillis()));
         System.out.println("Average #Insert/sec: " + + bulkImportResponse.getNumberOfDocumentsImported()
                 / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
         System.out.println("Average RU/sec: " + bulkImportResponse.getTotalRequestUnitsConsumed()
                 / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
-        totalWatch.reset();
     }
 
-    private void executeUpsert(String databaseName, String collectionName, DocumentCollection collection, ArrayList<String> documents) throws Exception{
+ */
+    private void executeImport(String databaseName, String collectionName, DocumentCollection collection, ArrayList<ArrayList<String>> batch) throws Exception {
+
+        // Builder pattern
+        Builder bulkExecutorBuilder = DocumentBulkExecutor.builder().from(
+                client,
+                databaseName,
+                collectionName,
+                collection.getPartitionKey(),
+                OFFER_THROUGHPUT); // throughput you want to allocate for bulk import out of the container's total throughput
+
+        // Instantiate DocumentBulkExecutor
+        DocumentBulkExecutor bulkExecutor = bulkExecutorBuilder.build();
+
+        // Set retries to 0 to pass complete control to bulk executor
+        client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(0);
+        client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(0);
+
+        totalWatch.reset();
+        totalWatch.start();
+        for (int i = 0; i<batch.size(); i++) {
+            BulkImportResponse bulkImportResponse = null;
+            bulkImportResponse = bulkExecutor.importAll(batch.get(i), false, true, null);
+            System.out.println(String.format("Files imported: %s", bulkImportResponse.getNumberOfDocumentsImported()));
+            System.out.println("Bad Input File: " + bulkImportResponse.getBadInputDocuments().size());
+            System.out.println(String.format("Import time: %s milliseconds", bulkImportResponse.getTotalTimeTaken().toMillis()));
+            System.out.println("Average #Insert/sec: " + +bulkImportResponse.getNumberOfDocumentsImported()
+                    / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
+            System.out.println("Average RU/sec: " + bulkImportResponse.getTotalRequestUnitsConsumed()
+                    / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
+        }
+        totalWatch.stop();
+        System.out.println(String.format("Import time for %s batches of %s documents: %s milliseconds", batch.size(), batch.get(0).size(), totalWatch.elapsed().toMillis()));
+    }
+
+    /*private void executeUpsert(String databaseName, String collectionName, DocumentCollection collection, ArrayList<String> documents) throws Exception{
 
         // Set client's retry options high for initialization
         client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(120);
@@ -156,20 +191,54 @@ public class Program {
             //set retries to 0 to pass control to bulk executor
             client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(0);
             client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(0);
-            totalWatch.start();
             BulkImportResponse bulkImportResponse = null;
             bulkImportResponse = bulkExecutor.importAll(documents, true, true, null);
 
-            totalWatch.stop();
             System.out.println( String.format("Files upsert: %s", bulkImportResponse.getNumberOfDocumentsImported()));
             System.out.println("Bad Input File: " + bulkImportResponse.getBadInputDocuments().size());
             System.out.println( String.format("Upsert time: %s milliseconds", bulkImportResponse.getTotalTimeTaken().toMillis()));
-            System.out.println(String.format("Total Upsert time measured by stopwatch: %s milliseconds", totalWatch.elapsed().toMillis()));
             System.out.println("Average #Upsert/sec: " + + bulkImportResponse.getNumberOfDocumentsImported()
                     / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
             System.out.println("Average RU/sec: " + bulkImportResponse.getTotalRequestUnitsConsumed()
                     / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
+        }
+    }
+
+     */
+    private void executeUpsert(String databaseName, String collectionName, DocumentCollection collection, ArrayList<ArrayList<String>> batch) throws Exception{
+
+        // Set client's retry options high for initialization
+        client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(120);
+        client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(100);
+        //Builder
+        Builder bulkExecutorBuilder = DocumentBulkExecutor.builder().from(
+                client,
+                databaseName,
+                collectionName,
+                collection.getPartitionKey(),
+                OFFER_THROUGHPUT);
+
+        //Instantiate Bulk executor
+        try(DocumentBulkExecutor bulkExecutor = bulkExecutorBuilder.build()){
+            //set retries to 0 to pass control to bulk executor
+            client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(0);
+            client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(0);
             totalWatch.reset();
+            totalWatch.start();
+            for (int i = 0; i< batch.size(); i++) {
+                BulkImportResponse bulkImportResponse = null;
+                bulkImportResponse = bulkExecutor.importAll(batch.get(i), true, true, null);
+
+                System.out.println(String.format("Files upsert: %s", bulkImportResponse.getNumberOfDocumentsImported()));
+                System.out.println("Bad Input File: " + bulkImportResponse.getBadInputDocuments().size());
+                System.out.println(String.format("Upsert time: %s milliseconds", bulkImportResponse.getTotalTimeTaken().toMillis()));
+/*                System.out.println("Average #Upsert/sec: " + +bulkImportResponse.getNumberOfDocumentsImported()
+                        / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
+                System.out.println("Average RU/sec: " + bulkImportResponse.getTotalRequestUnitsConsumed()
+                        / (0.001 * bulkImportResponse.getTotalTimeTaken().toMillis()));
+*/            }
+            totalWatch.stop();
+            System.out.println(String.format("Upsert time for %s batches of %s documents: %s milliseconds", batch.size(), batch.get(0).size(), totalWatch.elapsed().toMillis()));
         }
     }
 
@@ -259,4 +328,25 @@ public class Program {
 
     }
 
+    private ArrayList<ArrayList<String>> batchFiles(int batchSize, int numOfBatches, String path)
+    {
+        ArrayList<ArrayList<String>> batch = new ArrayList<>();
+        for(int i =0; i < numOfBatches; i++)
+        {
+            ArrayList<String> docs = JsonReader.generateJsonCollection(batchSize, i, path);
+            batch.add(docs);
+        }
+        return batch;
+    }
+
+    private void changeContainerThroughput(DocumentCollection collection, int throughput) throws DocumentClientException {
+        String collectionResourceId = collection.getResourceId();
+        Iterator<Offer> it = client.queryOffers(
+                String.format("SELECT * FROM r where r.offerResourceId = '%s'", collectionResourceId), null).getQueryIterator();
+        Offer offer = it.next();
+        System.out.println(offer.getContent().getInt("offerThroughput"));
+        // update the offer
+        offer.getContent().put("offerThroughput", throughput);
+        client.replaceOffer(offer);
+    }
 }

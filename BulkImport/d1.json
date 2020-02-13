@@ -1,0 +1,17 @@
+{
+  "id": "1234567111111111110000",
+  "mid": "1234567",
+  "date": 20200131,
+  "auth": {
+    "orderId": "111111111111111",
+    "terminalId": "2324564345",
+    "amount": 123.11,
+    "ccy": "GBP",
+    "time": 202001311100010,
+    "authCode": "YOHB18K",
+    "paymentType": "M",
+    "cardBrand": "V",
+    "cardType": "C",
+    "status": 1
+  }
+}
