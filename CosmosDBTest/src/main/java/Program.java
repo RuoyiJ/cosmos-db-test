@@ -1,38 +1,64 @@
 import com.google.common.base.Stopwatch;
-import com.microsoft.azure.documentdb.ConnectionMode;
-import com.microsoft.azure.documentdb.ConnectionPolicy;
-import com.microsoft.azure.documentdb.ConsistencyLevel;
-import com.microsoft.azure.documentdb.DataType;
-import com.microsoft.azure.documentdb.Database;
-import com.microsoft.azure.documentdb.Document;
-import com.microsoft.azure.documentdb.DocumentClient;
-import com.microsoft.azure.documentdb.DocumentClientException;
-import com.microsoft.azure.documentdb.DocumentCollection;
-import com.microsoft.azure.documentdb.Index;
-import com.microsoft.azure.documentdb.IndexingPolicy;
-import com.microsoft.azure.documentdb.PartitionKeyDefinition;
-import com.microsoft.azure.documentdb.RangeIndex;
-import com.microsoft.azure.documentdb.RequestOptions;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-import org.json.simple.parser.ParseException;
+import com.microsoft.azure.cosmosdb.ConnectionMode;
+import com.microsoft.azure.cosmosdb.ConnectionPolicy;
+import com.microsoft.azure.cosmosdb.ConsistencyLevel;
+import com.microsoft.azure.cosmosdb.DataType;
+import com.microsoft.azure.cosmosdb.Database;
+import com.microsoft.azure.cosmosdb.Document;
+import com.microsoft.azure.cosmosdb.DocumentClientException;
+import com.microsoft.azure.cosmosdb.DocumentCollection;
+import com.microsoft.azure.cosmosdb.IncludedPath;
+import com.microsoft.azure.cosmosdb.Index;
+import com.microsoft.azure.cosmosdb.IndexingPolicy;
+import com.microsoft.azure.cosmosdb.PartitionKeyDefinition;
+import com.microsoft.azure.cosmosdb.RequestOptions;
+import com.microsoft.azure.cosmosdb.ResourceResponse;
+import com.microsoft.azure.cosmosdb.rx.AsyncDocumentClient;
+import rx.Completable;
+import rx.Observable;
+import rx.Scheduler;
+import rx.schedulers.Schedulers;
 
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 
 public class Program {
 
-    private DocumentClient client;
+    private AsyncDocumentClient client;
+    private final ExecutorService executorService;
+    private final Scheduler scheduler;
     private Stopwatch stopwatch = Stopwatch.createUnstarted();
     private int THROUGHPUT = 1000;
+    private int fileInserted = 0;
+    //final Semaphore concurrencyControlSemaphore;
+
+    public Program() {
+        executorService = Executors.newFixedThreadPool(10);
+        scheduler = Schedulers.from(executorService);
+        //concurrencyControlSemaphore = new Semaphore(10);
+        //Connect to db
+        String serviceEndpoint = System.getenv("ServiceEndpoint");
+        String masterKey = System.getenv("MasterKey");
+        ConnectionPolicy policy = new ConnectionPolicy();
+        policy.setConnectionMode(ConnectionMode.Direct);
+        policy.setMaxPoolSize(1000);
+        this.client = new AsyncDocumentClient.Builder().withServiceEndpoint(serviceEndpoint)
+                .withMasterKeyOrResourceToken(masterKey)
+                .withConnectionPolicy(policy)
+                .withConsistencyLevel(ConsistencyLevel.Eventual)
+                .build();
+    }
 
     public static void main(String[] args)
     {
+        Program p = new Program();
         try{
-            Program p = new Program();
             p.testCycle();
             System.out.println("-------------------Complete--------------------");
         }
@@ -40,23 +66,17 @@ public class Program {
         {
             e.printStackTrace();
         }
+        finally {
+            System.out.println("Closing down DocumentClient");
+            p.close();
+        }
     }
 
     private void testCycle() throws Exception {
-        //Connection policy
-        ConnectionPolicy connectionPolicy = new ConnectionPolicy();
-        connectionPolicy.setConnectionMode(ConnectionMode.DirectHttps);
-        connectionPolicy.setMaxPoolSize(1000);
-        //Connect to db
-        String serviceEndpoint = System.getenv("ServiceEndpoint");
-        String masterKey = System.getenv("MasterKey");
-        this.client = new DocumentClient(serviceEndpoint,
-                masterKey,
-                connectionPolicy,
-                ConsistencyLevel.Session);
 
-        String databaseName = "devdb";
+        String databaseName = "testdb";
         String collectionName = "daily-trans";
+
 
         //Set client's retry options high for initialization
         client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(120);
@@ -64,123 +84,167 @@ public class Program {
 
         //create or connect to database and collection
         this.createDatabaseIfNotExists(databaseName);
-        this.createDocumentCollectionIfNotExists(databaseName, collectionName);
-        DocumentCollection collection = null;
+        DocumentCollection collection = this.createDocumentCollection(databaseName, collectionName);
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
         System.out.println(collectionLink);
-        collection = client.readCollection(collectionLink, null).getResource();
+
+        client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(0);
+        client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(0);
+
 
         //insert document
-        stopwatch.start();
-        String filepath = "C:\\Users\\Sparta Global\\Desktop\\trans\\d1.json";
-        insertDocument(databaseName, collectionName, filepath);
-        stopwatch.stop();
+        insertDocument(databaseName, collectionName);
         System.out.println(String.format("Insert time is %s milliseconds", stopwatch.elapsed().toMillis()));
+        System.out.println(String.format("%s files inserted", fileInserted));
     }
 
     private void createDatabaseIfNotExists(String databaseName) throws DocumentClientException, IOException {
         String databaseLink = String.format("/dbs/%s", databaseName);
 
-        // Check to verify a database with the id=FamilyDB does not exist
-        try {
-            this.client.readDatabase(databaseLink, null);
-            System.out.println(String.format("Found %s", databaseName));
-        } catch (DocumentClientException de) {
-            // If the database does not exist, create a new database
-            if (de.getStatusCode() == 404) {
-                Database database = new Database();
-                database.setId(databaseName);
+        // Check to verify a database with the id does not exist
 
-                this.client.createDatabase(database, null);
-                System.out.println(String.format("Created %s", databaseName));
-            } else {
-                throw de;
+        Observable<ResourceResponse<Database>> databaseReadObs = this.client.readDatabase(databaseLink, null);
+        Observable<ResourceResponse<Database>> databaseExistenceObs = databaseReadObs.doOnNext(x -> {
+            System.out.println("Found " + databaseName);
+        }).onErrorResumeNext(e -> {
+            if (e instanceof DocumentClientException) {
+                DocumentClientException de = (DocumentClientException) e;
+                // If the database does not exist, create a new database
+                if (de.getStatusCode() == 404) {
+                    Database database = new Database();
+                    database.setId(databaseName);
+                    System.out.println(String.format("Creating %s", databaseName));
+                    return this.client.createDatabase(database, null);
+                }
             }
-        }
+            System.err.println(String.format("Reading database %s failed", databaseName));
+            return Observable.error(e);
+        });
+        databaseExistenceObs.toCompletable().await();
+        System.out.println(String.format("Checking database %s completed", databaseName));
     }
 
-    private void createDocumentCollectionIfNotExists(String databaseName, String collectionName) throws IOException,
+
+    private DocumentCollection createDocumentCollection(String databaseName, String collectionName) throws IOException,
             DocumentClientException {
         String databaseLink = String.format("/dbs/%s", databaseName);
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
 
+        System.out.println("-------------------------Clean Collection---------------------------");
+
         try {
-            System.out.println("-------------------------Clean Collection---------------------------");
-            this.client.deleteCollection(collectionLink, null);
-            this.client.readCollection(collectionLink, null);
-            System.out.println(String.format("Found %s", collectionName));
-        } catch (DocumentClientException de) {
-            // If the document collection does not exist, create a new
-            // collection
-            if (de.getStatusCode() == 404) {
-                DocumentCollection collectionInfo = new DocumentCollection();
-                collectionInfo.setId(collectionName);
-
-                // Set partition key
-                PartitionKeyDefinition partitionKeyDefinition = new PartitionKeyDefinition();
-                Collection<String> paths = new ArrayList<>();
-                paths.add("/mid");
-                partitionKeyDefinition.setPaths(paths);
-                collectionInfo.setPartitionKey(partitionKeyDefinition);
-
-                // Optionally, you can configure the indexing policy of a
-                // collection. Here we configure collections for maximum query
-                // flexibility including string range queries.
-                RangeIndex index = new RangeIndex(DataType.String);
-                index.setPrecision(-1);
-
-                collectionInfo.setIndexingPolicy(new IndexingPolicy(new Index[] { index }));
-
-                // DocumentDB collections can be reserved with throughput
-                // specified in request units/second. 1 RU is a normalized
-                // request equivalent to the read of a 1KB document.
-                RequestOptions requestOptions = new RequestOptions();
-                //requestOptions.setOfferThroughput(THROUGHPUT);
-
-                this.client.createCollection(databaseLink, collectionInfo, requestOptions);
-
-                System.out.println(String.format("Created %s", collectionName));
-            } else {
-                throw de;
-            }
+            this.client.deleteCollection(collectionLink, null).toBlocking().single().getResource();
         }
+        catch(Exception e)
+        {
+            System.out.println("no existing collection");
+        }
+        finally {
+            DocumentCollection collectionInfo = new DocumentCollection();
+            collectionInfo.setId(collectionName);
 
+            // Set partition key
+            PartitionKeyDefinition partitionKeyDefinition = new PartitionKeyDefinition();
+            List<String> paths = new ArrayList<>();
+            paths.add("/mid");
+            partitionKeyDefinition.setPaths(paths);
+            collectionInfo.setPartitionKey(partitionKeyDefinition);
+
+            // Optionally, you can configure the indexing policy of a
+            // collection. Here we configure collections for maximum query
+            // flexibility including string range queries.
+            // Set indexing policy to be range range for string and number
+            IndexingPolicy indexingPolicy = new IndexingPolicy();
+            Collection<IncludedPath> includedPaths = new ArrayList<>();
+            IncludedPath includedPath = new IncludedPath();
+            includedPath.setPath("/*");
+            Collection<Index> indexes = new ArrayList<>();
+            Index stringIndex = Index.Range(DataType.String);
+            stringIndex.set("precision", -1);
+            indexes.add(stringIndex);
+            includedPath.setIndexes(indexes);
+            includedPaths.add(includedPath);
+            indexingPolicy.setIncludedPaths(includedPaths);
+            collectionInfo.setIndexingPolicy(indexingPolicy);
+
+            // DocumentDB collections can be reserved with throughput
+            // specified in request units/second. 1 RU is a normalized
+            // request equivalent to the read of a 1KB document.
+            RequestOptions requestOptions = new RequestOptions();
+            requestOptions.setOfferThroughput(THROUGHPUT);
+
+            this.client.createCollection(databaseLink, collectionInfo, requestOptions).toBlocking().single().getResource();
+
+            System.out.println(String.format("Created %s", collectionName));
+            return collectionInfo;
+        }
     }
 
 
-    private void createDocumentIfNotExists(String databaseName, String collectionName, Document doc)
-            throws DocumentClientException, IOException {
-        try {
-            String documentLink = String.format("/dbs/%s/colls/%s/docs/%s", databaseName, collectionName, doc.getId());
-            this.client.readDocument(documentLink, new RequestOptions());
-        } catch (DocumentClientException de) {
-            if (de.getStatusCode() == 404) {
-                String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
-                this.client.createDocument(collectionLink, doc, new RequestOptions(), true);
-                System.out.println(String.format("Created Family %s", doc.getId()));
-            } else {
-                throw de;
-            }
+    private void createDocuments(String databaseName, String collectionName, int batchSize, ArrayList<Document> docs) throws Exception {
+
+        String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
+        List<Observable<Document>> observableList = new ArrayList<>();
+        //final CountDownLatch completionLatch = new CountDownLatch(batchSize);
+
+        for (int i = 0;i<batchSize;i++) {
+            Observable<Document> observable = this.client
+                    .createDocument(collectionLink, docs.get(i), null, false).map(ResourceResponse::getResource);
+            observable.subscribe(o -> {
+                        System.out.println("Thread +" + Thread.currentThread().getName() + " inserted doc id: " + o.getId());
+                    },
+                    e -> {
+                System.out.println(String.format("Encountered failure %s on thread %s",e.getMessage(), Thread.currentThread().getName()));
+                    },
+                    ()->{
+                fileInserted++;
+            });
+            if(stopwatch.elapsed().toMillis()>300000)
+                break;
+
+            observableList.add(observable);
         }
+
+        Observable.merge(observableList).subscribe(o->{System.out.println("batch inserted at time "+ stopwatch.elapsed().toMillis());}, e->{
+                    //concurrencyControlSemaphore.release();
+            },
+                ()->{
+                    //concurrencyControlSemaphore.release();
+        });
+
+
+        //completionLatch.await();
     }
 
-    private void insertDocument(String databaseName, String collectionName, String path){
-        JSONParser parser = new JSONParser();
-        try(FileReader reader = new FileReader(path)) {
-            JSONObject obj = (JSONObject)parser.parse(reader);
-            String content = obj.toJSONString();
-            Document doc = new Document(content);
-            createDocumentIfNotExists(databaseName,collectionName,doc);
-            System.out.println("Successfully inserted a document");
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (ParseException e) {
-            e.printStackTrace();
-        } catch (DocumentClientException e) {
-            e.printStackTrace();
-            System.out.println("Fail to insert document");
+    private void insertDocument(String databaseName, String collectionName) throws Exception {
+
+        int batchSize = 10;
+        int batchNum = 10;
+        //int time = 300000;
+        Document doc = Auth.getDocFromJson();
+
+        stopwatch.start();
+        System.out.println("---------------write------------------");
+        for(int i = 0; i< batchNum; i++) {
+            ArrayList<Document> docs = new Auth(batchSize, i, doc).docDefinitions;
+            Runnable r = () -> {
+                try {
+                    createDocuments(databaseName, collectionName, batchSize, docs);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            };
+            executorService.execute(r);
+            //ArrayList<Observable<Document>> createObservables = new ArrayList<>();
+            //createDocuments(databaseName, collectionName, batchSize, docs);
+            //Observable.merge(createObservables, 100).toList().toBlocking().single();
         }
+        stopwatch.stop();
+        System.in.read();
+    }
+    private void close()
+    {
+        executorService.shutdown();
+        client.close();
     }
 }
