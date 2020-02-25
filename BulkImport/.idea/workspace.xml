@@ -2,8 +2,14 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="dfbe89ac-bd71-43af-a13f-bf4aa525fd3f" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/../CosmosDBTest/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/../CosmosDBTest/src/main/java/Auth.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/.idea/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/.idea/compiler.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/CosmosAsyncTest.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/pom.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Auth.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Main.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../CosmosDBTest/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/../CosmosDBTest/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../CosmosDBTest/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/../CosmosDBTest/pom.xml" afterDir="false" />
