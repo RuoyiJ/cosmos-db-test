@@ -4,16 +4,17 @@ import com.microsoft.azure.documentdb.*;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.concurrent.*;
 
 public class Main {
     private DocumentClient client;
     private final ExecutorService executorService;
     private Stopwatch stopwatch = Stopwatch.createUnstarted();
-    private final int THROUGHPUT = 10000;
+    private final int THROUGHPUT = 100000;
     private final int threadNum = 50;
-    private final int batchPerThread = 10;
-    private final int batchSize = 50;
+    private final int batchPerThread = 50;
+    private final int batchSize = 100;
     private final int timeout = 200;
     private int fileInserted = 0;
 
@@ -160,7 +161,7 @@ public class Main {
             });
              */
         }
-        //System.out.println(String.format("Thread: %s stopwatch: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
+        System.out.println(String.format("Thread: %s stopwatch: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
         System.out.println("-----------------------Sleep-------------------------");
         Thread.sleep(timeout);
         //System.out.println(String.format("Thread: %s rest: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
@@ -182,6 +183,8 @@ public class Main {
         System.out.println("---------------write------------------");
         for (int b = 0; b < batchPerThread;b++)
         {
+            //List<Callable<Long>> tasks = new ArrayList<>();
+
             for(int i = 0; i< threadNum; i++) {
                 int batchNum = i + b*threadNum;
                 ArrayList<Document> docs = new Auth(batchSize, batchNum , doc).docDefinitions;
@@ -192,16 +195,12 @@ public class Main {
                         e.printStackTrace();
                     }
                 };
+                executorService.execute(r);
 
-                /*executorService.execute(r);
-                List<Callable<String>> tasks = new ArrayList<>();
-                for(int j = 0; j< docs.size(); i++){
-                    Insert insertTask = new Insert(client,collectionLink,docs.get(i));
-                    tasks.add(insertTask);
-                }
-                List<Future<String>> s = executorService.invokeAll(tasks);
-                 */
+                //InsertDocuments insertTask = new InsertDocuments(client,collectionLink,docs);
+                //tasks.add(insertTask);
             }
+            //List<Future<Long>> callback = executorService.invokeAll(tasks);
             //Thread.sleep(2000);
         }
 

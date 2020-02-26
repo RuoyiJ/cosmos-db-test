@@ -2,15 +2,7 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="dfbe89ac-bd71-43af-a13f-bf4aa525fd3f" name="Default Changelist" comment="">
-      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/DocumentDB.Spatial.Sql.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/Microsoft.Azure.Documents.ServiceInterop.dll" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/d1.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/d2.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Insert.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/Program.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/Program.java" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../CosmosAsyncTest/pom.xml" beforeDir="false" afterPath="$PROJECT_DIR$/../CosmosAsyncTest/pom.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Auth.java" beforeDir="false" afterPath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Auth.java" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Main.java" beforeDir="false" afterPath="$PROJECT_DIR$/../CosmosAsyncTest/src/main/java/Main.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
