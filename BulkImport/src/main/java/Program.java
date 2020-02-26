@@ -30,7 +30,7 @@ public class Program {
 
     private DocumentClient client;
     private Stopwatch totalWatch = Stopwatch.createUnstarted();
-    private int OFFER_THROUGHPUT = 100000;
+    private int OFFER_THROUGHPUT = 1000;
     /**
      * Run a Hello DocumentDB console application.
      *

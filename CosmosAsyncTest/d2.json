@@ -1,0 +1,41 @@
+{
+  "id": "1234567111111111110000",
+  "mid": "1234567",
+  "date": 20200131,
+  "auth": {
+    "orderId": "111111111111111",
+    "terminalId": "2324564345",
+    "amount": 123.11,
+    "ccy": "GBP",
+    "time": 202001311100010,
+    "authCode": "YOHB18K",
+    "paymentType": "M",
+    "cardBrand": "V",
+    "cardType": "C",
+    "status": 1
+  },
+  "ecom": {
+    "orderNo": "12345654321113",
+    "orderDate": 20200113,
+    "description": "string",
+    "shippingAddress": "string"
+  },
+  "fee": [
+    {
+      "type": "EEAVisaDebit",
+      "amount": 21.21,
+      "ccy": "GBP"
+    }
+  ],
+  "clearing": {
+    "arn": "23245643452",
+    "time": 202001311100011,
+    "status": 2
+  },
+  "funding": {
+    "date": "202001311100011",
+    "status": 18,
+    "amount": 101.9,
+    "ccy": "GBP"
+  }
+}

@@ -1,43 +1,29 @@
-import com.microsoft.azure.documentdb.ConnectionMode;
-import com.microsoft.azure.documentdb.ConnectionPolicy;
-import com.microsoft.azure.documentdb.ConsistencyLevel;
-import com.microsoft.azure.documentdb.DataType;
-import com.microsoft.azure.documentdb.Database;
-import com.microsoft.azure.documentdb.Document;
-import com.microsoft.azure.documentdb.DocumentClient;
-import com.microsoft.azure.documentdb.DocumentClientException;
-import com.microsoft.azure.documentdb.DocumentCollection;
-import com.microsoft.azure.documentdb.Index;
-import com.microsoft.azure.documentdb.IndexingPolicy;
-import com.microsoft.azure.documentdb.PartitionKeyDefinition;
-import com.microsoft.azure.documentdb.RangeIndex;
-import com.microsoft.azure.documentdb.RequestOptions;
+import com.google.common.base.Stopwatch;
+import com.microsoft.azure.documentdb.*;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 public class Main {
     private DocumentClient client;
     private final ExecutorService executorService;
-    //private Stopwatch stopwatch = Stopwatch.createUnstarted();
-    private final int THROUGHPUT = 5000;
-    private final int batchSize = 10;
-    private final int threadNum = 10;
-    private final int batchNum = 10;
+    private Stopwatch stopwatch = Stopwatch.createUnstarted();
+    private final int THROUGHPUT = 10000;
+    private final int threadNum = 50;
+    private final int batchPerThread = 10;
+    private final int batchSize = 50;
     private final int timeout = 200;
     private int fileInserted = 0;
 
     public Main() {
-        executorService = Executors.newFixedThreadPool(100);
+        executorService = Executors.newFixedThreadPool(threadNum);
         //Connect to db
         String serviceEndpoint = System.getenv("ServiceEndpoint");
         String masterKey = System.getenv("MasterKey");
         ConnectionPolicy policy = new ConnectionPolicy();
-        policy.setConnectionMode(ConnectionMode.DirectHttps);
+        policy.setConnectionMode(ConnectionMode.Gateway);
         policy.setMaxPoolSize(1000);
         this.client = new DocumentClient(serviceEndpoint,
                 masterKey,
@@ -47,7 +33,6 @@ public class Main {
 
     public static void main(String[] args)
     {
-        org.apache.log4j.Logger.getLogger("io.netty").setLevel(org.apache.log4j.Level.OFF);
 
         Main p = new Main();
         try{
@@ -66,7 +51,7 @@ public class Main {
 
     private void testCycle() throws Exception {
 
-        String databaseName = "devdb";
+        String databaseName = "testdb";
         String collectionName = "daily-trans";
 
 
@@ -86,7 +71,7 @@ public class Main {
 
         //insert document
         insertDocument(databaseName, collectionName, collectionLink);
-        //System.out.println(String.format("Insert time is %s milliseconds", stopwatch.elapsed().toMillis()));
+        System.out.println(String.format("Insert time is %s milliseconds", stopwatch.elapsed().toMillis()));
         System.out.println(String.format("%s files inserted", fileInserted));
     }
 
@@ -117,8 +102,8 @@ public class Main {
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
 
         try {
-            System.out.println("-------------------------Clean Collection---------------------------");
-            //this.client.deleteCollection(collectionLink, null);
+            System.out.println("-------------------------Fetch Collection---------------------------");
+            this.client.deleteCollection(collectionLink, null);
             this.client.readCollection(collectionLink, null).getResource();
             System.out.println(String.format("Found %s", collectionName));
         } catch (DocumentClientException de) {
@@ -157,74 +142,73 @@ public class Main {
         }
     }
 
-    private void createDocuments(String databaseName, String collectionName, int batchSize, ArrayList<Document> docs) throws Exception {
+    private void createDocuments(String databaseName, String collectionName,  ArrayList<Document> docs) throws Exception {
 
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
+        //List<Future<Void>> futures = new ArrayList<>();
 
-        for (int i = 0;i<batchSize;i++) {
-
+        // do some work on current thread
+        for (int i = 0; i < docs.size(); i++) {
+            create(collectionLink,docs.get(i));
+            int index = i;
+            /*CompletableFuture.runAsync(()-> {
+                try {
+                    create(collectionLink,docs.get(index));
+                } catch (DocumentClientException e) {
+                    e.printStackTrace();
+                }
+            });
+             */
         }
+        //System.out.println(String.format("Thread: %s stopwatch: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
+        System.out.println("-----------------------Sleep-------------------------");
+        Thread.sleep(timeout);
+        //System.out.println(String.format("Thread: %s rest: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
 
+    }
+
+    private void create(String collectionLink,  Document doc) throws DocumentClientException {
+        ResourceResponse response = client.createDocument(collectionLink, doc,null,true);
+        fileInserted++;
+        //System.out.println(String.format("Doc ID: %s Thread: %s stopwatch: %s", response.getResource().getId(),Thread.currentThread(), stopwatch.elapsed().toMillis()));
     }
 
     private void insertDocument(String databaseName, String collectionName, String collectionLink) throws Exception {
 
-        //int time = 300000;
         Document doc = Auth.getDocFromJson();
 
+
+        stopwatch.start();
         System.out.println("---------------write------------------");
-        for(int i = 0; i< threadNum; i++) {
-            ArrayList<Document> docs = new Auth(batchSize, i, doc).docDefinitions;
-            Runnable r = () -> {
-                try {
-                    createDocuments(databaseName, collectionName, batchSize, docs);
-                    //executeStoredProcedure(collectionLink,docs);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            };
-            Thread thread = new Thread(r);
-            thread.start();
-            //executorService.execute(r);
-
-            //ArrayList<Observable<Document>> createObservables = new ArrayList<>();
-            //createDocuments(databaseName, collectionName, batchSize, docs);
-            //Observable.merge(createObservables, 100).toList().toBlocking().single();
-        }
-        System.in.read();
-
-    }
-
-    /*private void executeStoredProcedure(String collectionLink, ArrayList<Document> docs) throws InterruptedException {
-        String sprocLink = String.format("%s/sprocs/%s", collectionLink, "insertDocument");
-        final CountDownLatch completionLatch = new CountDownLatch(docs.size());
-
-        //StoredProcedureResponse response;
-        for (int i = 0; i< docs.size();i++) {
-            Object[] storedProcedureArgs = new Object[]{docs.get(i)};
-            AsyncCallable
-            client.executeStoredProcedure(sprocLink, storedProcedureArgs).subscribeOn(scheduler)
-                    .subscribe(r -> {
-                        System.out.println(r.getResponseAsString());
-                        completionLatch.countDown();
-                    }, e -> {
+        for (int b = 0; b < batchPerThread;b++)
+        {
+            for(int i = 0; i< threadNum; i++) {
+                int batchNum = i + b*threadNum;
+                ArrayList<Document> docs = new Auth(batchSize, batchNum , doc).docDefinitions;
+                Runnable r = () -> {
+                    try {
+                        createDocuments(databaseName, collectionName, docs);
+                    } catch (Exception e) {
                         e.printStackTrace();
-                        completionLatch.countDown();
-                    });
-        }
-        completionLatch.await();
-    }*/
+                    }
+                };
 
-    private void heavyWork(String databaseName, String collectionName) {
-        // I may do a lot of IO work: e.g., writing to log files
-        // a lot of computational work
-        // or may do Thread.sleep()
-
-        try {
-            TimeUnit.MILLISECONDS.sleep(timeout);
-        } catch (Exception e) {
+                /*executorService.execute(r);
+                List<Callable<String>> tasks = new ArrayList<>();
+                for(int j = 0; j< docs.size(); i++){
+                    Insert insertTask = new Insert(client,collectionLink,docs.get(i));
+                    tasks.add(insertTask);
+                }
+                List<Future<String>> s = executorService.invokeAll(tasks);
+                 */
+            }
+            //Thread.sleep(2000);
         }
+
+        System.in.read();
+        stopwatch.stop();
     }
+
     private void close()
     {
         executorService.shutdown();

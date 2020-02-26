@@ -34,7 +34,8 @@ public class Auth {
 
     public static Document getDocFromJson()
     {
-        String filepath = "C:\\Users\\Sparta Global\\Desktop\\trans\\d1.json";
+        String root = System.getProperty("user.dir");
+        String filepath = root + "\\d1.json";
         JSONParser parser = new JSONParser();
         try(FileReader reader = new FileReader(filepath)) {
             JSONObject obj = (JSONObject) parser.parse(reader);
