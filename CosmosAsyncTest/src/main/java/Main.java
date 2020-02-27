@@ -183,7 +183,7 @@ public class Main {
         System.out.println("---------------write------------------");
         for (int b = 0; b < batchPerThread;b++)
         {
-            //List<Callable<Long>> tasks = new ArrayList<>();
+            List<Callable<Long>> tasks = new ArrayList<>();
 
             for(int i = 0; i< threadNum; i++) {
                 int batchNum = i + b*threadNum;
@@ -200,8 +200,18 @@ public class Main {
                 //InsertDocuments insertTask = new InsertDocuments(client,collectionLink,docs);
                 //tasks.add(insertTask);
             }
-            //List<Future<Long>> callback = executorService.invokeAll(tasks);
-            //Thread.sleep(2000);
+            /*List<Future<Long>> callback = executorService.invokeAll(tasks);
+            callback.stream().forEach(c-> {
+                try {
+                    System.out.println(""+ c.get());
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                } catch (ExecutionException e) {
+                    e.printStackTrace();
+                }
+            });
+            Thread.sleep(2000);
+             */
         }
 
         System.in.read();

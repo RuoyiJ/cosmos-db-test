@@ -10,6 +10,7 @@ import java.util.ArrayList;
 
 public class Auth {
     ArrayList<Document> docDefinitions = new ArrayList<>();
+    private final int transPerMid = 10;
 
     public Auth(int batchSize, int batchNum, Document doc) throws Exception{
         for(int i = 0; i< batchSize; i++)
@@ -17,7 +18,7 @@ public class Auth {
             Document newDoc = new Document(doc.toJson());
             StringBuilder id = new StringBuilder(doc.getId());
             //StringBuilder oId = new StringBuilder(doc.getString("auth.orderId"));
-            int mid = 1234567 + (i + batchSize/15 * batchNum)/2 ;
+            int mid = 1234567 + (i + batchSize/transPerMid * batchNum) ;
             long orderId = 100000000 + (i + batchSize * batchNum);
             id.replace(0,7,Integer.toString(mid));
             //int last = oId.length();
