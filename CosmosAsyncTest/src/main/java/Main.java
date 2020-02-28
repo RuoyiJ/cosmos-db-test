@@ -1,12 +1,10 @@
 import com.google.common.base.Stopwatch;
-import com.google.common.util.concurrent.Futures;
 import com.microsoft.azure.documentdb.*;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
-import java.util.List;
 import java.util.concurrent.*;
 
 public class Main {
@@ -40,7 +38,7 @@ public class Main {
 
         Main p = new Main();
         try{
-            p.testCycle();
+            p.myTest();
             System.out.println("-------------------Complete--------------------");
         }
         catch (Exception e)
@@ -53,7 +51,7 @@ public class Main {
         }
     }
 
-    private void testCycle() throws Exception {
+    private void myTest() throws Exception {
 
         String databaseName = "testdb";
         String collectionName = "daily-trans";

@@ -1,11 +1,4 @@
 import com.microsoft.azure.documentdb.Document;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-import org.json.simple.parser.ParseException;
-
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -40,18 +33,7 @@ public class DocumentBuilder {
     {
         String root = System.getProperty("user.dir") + "\\";
         String filepath = root + filename;
-        /*JSONParser parser = new JSONParser();
-        try(FileReader reader = new FileReader(filepath)) {
-            JSONObject obj = (JSONObject) parser.parse(reader);
-            String content = obj.toJSONString();
-            Document doc = new Document(content);
-            return doc;
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
-        } catch (IOException | ParseException e) {
-            e.printStackTrace();
-        }*/
-        String content = null;
+        String content;
         try {
             content = new String(Files.readAllBytes(Paths.get(filepath)));
             Document doc = new Document(content);

@@ -1,13 +1,10 @@
-import com.google.common.base.Stopwatch;
 import com.microsoft.azure.documentdb.Document;
 import com.microsoft.azure.documentdb.DocumentClient;
 import com.microsoft.azure.documentdb.PartitionKey;
 import com.microsoft.azure.documentdb.RequestOptions;
 import com.microsoft.azure.documentdb.ResourceResponse;
 
-import javax.swing.*;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.Callable;
 
 public class InsertDocuments implements Callable<Integer> {
