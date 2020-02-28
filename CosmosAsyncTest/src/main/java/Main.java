@@ -1,9 +1,11 @@
 import com.google.common.base.Stopwatch;
+import com.google.common.util.concurrent.Futures;
 import com.microsoft.azure.documentdb.*;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.*;
 
@@ -11,12 +13,13 @@ public class Main {
     private DocumentClient client;
     private final ExecutorService executorService;
     private Stopwatch stopwatch = Stopwatch.createUnstarted();
-    private final int THROUGHPUT = 100000;
-    private final int threadNum = 50;
-    private final int batchPerThread = 50;
-    private final int batchSize = 100;
+    private final int THROUGHPUT = 400;
+    private final int threadNum = 2;
+    private final int batchPerThread = 1;
+    private final int batchSize = 2;
     private final int timeout = 200;
-    private int fileInserted = 0;
+    private int failure = 0;
+    private int batchCount = 0;
 
     public Main() {
         executorService = Executors.newFixedThreadPool(threadNum);
@@ -25,7 +28,7 @@ public class Main {
         String masterKey = System.getenv("MasterKey");
         ConnectionPolicy policy = new ConnectionPolicy();
         policy.setConnectionMode(ConnectionMode.Gateway);
-        policy.setMaxPoolSize(1000);
+        policy.setMaxPoolSize(200);
         this.client = new DocumentClient(serviceEndpoint,
                 masterKey,
                 policy,
@@ -55,14 +58,13 @@ public class Main {
         String databaseName = "testdb";
         String collectionName = "daily-trans";
 
-
         //Set client's retry options high for initialization
         client.getConnectionPolicy().getRetryOptions().setMaxRetryWaitTimeInSeconds(120);
         client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(100);
 
         //create or connect to database and collection
         this.createDatabaseIfNotExists(databaseName);
-        this.createDocumentCollectionIfNotExists(databaseName, collectionName);
+        DocumentCollection collection =this.createDocumentCollectionIfNotExists(databaseName, collectionName);
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
         System.out.println(collectionLink);
 
@@ -70,10 +72,16 @@ public class Main {
         client.getConnectionPolicy().getRetryOptions().setMaxRetryAttemptsOnThrottledRequests(0);
 
 
-        //insert document
-        insertDocument(databaseName, collectionName, collectionLink);
-        System.out.println(String.format("Insert time is %s milliseconds", stopwatch.elapsed().toMillis()));
-        System.out.println(String.format("%s files inserted", fileInserted));
+        //insert documents
+        insertBatches(databaseName, collectionName);
+        System.out.println(String.format("%s failures", failure));
+
+        // upsert documents
+        upsertBatches(databaseName,collectionName);
+        System.out.println(String.format("%s failures", failure));
+
+        //Set throughput low
+        changeContainerThroughput(collection, 1000);
     }
 
     private void createDatabaseIfNotExists(String databaseName) throws DocumentClientException, IOException {
@@ -97,16 +105,17 @@ public class Main {
         }
     }
 
-    private void createDocumentCollectionIfNotExists(String databaseName, String collectionName) throws IOException,
+    private DocumentCollection createDocumentCollectionIfNotExists(String databaseName, String collectionName) throws IOException,
             DocumentClientException {
         String databaseLink = String.format("/dbs/%s", databaseName);
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
 
         try {
             System.out.println("-------------------------Fetch Collection---------------------------");
-            this.client.deleteCollection(collectionLink, null);
-            this.client.readCollection(collectionLink, null).getResource();
+            //this.client.deleteCollection(collectionLink, null);
+            DocumentCollection collection = this.client.readCollection(collectionLink, null).getResource();
             System.out.println(String.format("Found %s", collectionName));
+            return collection;
         } catch (DocumentClientException de) {
             // If the document collection does not exist, create a new
             // collection
@@ -135,15 +144,16 @@ public class Main {
                 requestOptions.setOfferThroughput(THROUGHPUT);
 
                 this.client.createCollection(databaseLink, collectionInfo, requestOptions);
-
                 System.out.println(String.format("Created %s", collectionName));
+                DocumentCollection collection = this.client.readCollection(collectionLink, null).getResource();
+                return collection;
             } else {
                 throw de;
             }
         }
     }
 
-    private void createDocuments(String databaseName, String collectionName,  ArrayList<Document> docs) throws Exception {
+    private void createDocuments(String databaseName, String collectionName, ArrayList<Document> docs) throws Exception {
 
         String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
         //List<Future<Void>> futures = new ArrayList<>();
@@ -152,72 +162,140 @@ public class Main {
         for (int i = 0; i < docs.size(); i++) {
             create(collectionLink,docs.get(i));
             int index = i;
-            /*CompletableFuture.runAsync(()-> {
-                try {
-                    create(collectionLink,docs.get(index));
-                } catch (DocumentClientException e) {
-                    e.printStackTrace();
-                }
-            });
-             */
         }
-        System.out.println(String.format("Thread: %s stopwatch: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
-        System.out.println("-----------------------Sleep-------------------------");
-        Thread.sleep(timeout);
-        //System.out.println(String.format("Thread: %s rest: %s", Thread.currentThread(), stopwatch.elapsed().toMillis()));
-
+        batchCount++;
+        System.out.println(String.format("BatchCount: %s Thread: %s stopwatch: %s", batchCount, Thread.currentThread(), stopwatch.elapsed().toMillis()));
     }
 
-    private void create(String collectionLink,  Document doc) throws DocumentClientException {
-        ResourceResponse response = client.createDocument(collectionLink, doc,null,true);
-        fileInserted++;
+    private void upsertDocuments(String databaseName, String collectionName, ArrayList<Document> docs) throws Exception {
+
+        String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
+
+        // do some work on current thread
+        for (int i = 0; i < docs.size(); i++) {
+            upsert(collectionLink,docs.get(i));
+            int index = i;
+        }
+        batchCount++;
+        System.out.println(String.format("BatchCount: %s Thread: %s stopwatch: %s", batchCount, Thread.currentThread(), stopwatch.elapsed().toMillis()));
+    }
+
+    private void create(String collectionLink,  Document doc) {
+        RequestOptions requestOptions = new RequestOptions();
+        PartitionKey partitionKey= new PartitionKey(doc.get("mid"));
+        requestOptions.setPartitionKey(partitionKey);
+        try {
+            ResourceResponse response = client.createDocument(collectionLink, doc,requestOptions,true);
+        } catch (DocumentClientException e) {
+            failure++;
+            e.printStackTrace();
+        }
         //System.out.println(String.format("Doc ID: %s Thread: %s stopwatch: %s", response.getResource().getId(),Thread.currentThread(), stopwatch.elapsed().toMillis()));
     }
 
-    private void insertDocument(String databaseName, String collectionName, String collectionLink) throws Exception {
+    private void upsert(String collectionLink, Document doc) {
+        RequestOptions requestOptions = new RequestOptions();
+        PartitionKey partitionKey= new PartitionKey(doc.get("mid"));
+        requestOptions.setPartitionKey(partitionKey);
+        try {
+            ResourceResponse response = client.upsertDocument(collectionLink,doc,requestOptions,true);
+        } catch (DocumentClientException e) {
+            failure++;
+            e.printStackTrace();
+        }
+    }
 
-        Document doc = Auth.getDocFromJson();
+    private void insertBatches(String databaseName, String collectionName) throws Exception {
 
+        Document doc = DocumentBuilder.getDocFromJson("d1.json");
+        failure = 0;
+        batchCount = 0;
 
         stopwatch.start();
         System.out.println("---------------write------------------");
         for (int b = 0; b < batchPerThread;b++)
         {
-            List<Callable<Long>> tasks = new ArrayList<>();
+            //List<Callable<Integer>> tasks = new ArrayList<>();
 
             for(int i = 0; i< threadNum; i++) {
-                int batchNum = i + b*threadNum;
-                ArrayList<Document> docs = new Auth(batchSize, batchNum , doc).docDefinitions;
+                int batchNum = i + b * threadNum;
+                ArrayList<Document> docs = new DocumentBuilder(batchSize, batchNum , doc).docDefinitions;
                 Runnable r = () -> {
                     try {
                         createDocuments(databaseName, collectionName, docs);
+                        //docs.stream().forEach(d->{System.out.println(d.getId());});
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
                 };
                 executorService.execute(r);
 
-                //InsertDocuments insertTask = new InsertDocuments(client,collectionLink,docs);
-                //tasks.add(insertTask);
+                /*String collectionLink = String.format("/dbs/%s/colls/%s", databaseName, collectionName);
+                InsertDocuments insertTask = new InsertDocuments(client,collectionLink,docs);
+                tasks.add(insertTask);
+
+                 */
             }
-            /*List<Future<Long>> callback = executorService.invokeAll(tasks);
-            callback.stream().forEach(c-> {
+            /*List<Future<Integer>> callback = executorService.invokeAll(tasks);
+            int totalFileNum = callback.stream()
+                    .mapToInt(value -> {
                 try {
-                    System.out.println(""+ c.get());
+                    return value.get();
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 } catch (ExecutionException e) {
                     e.printStackTrace();
-                }
-            });
-            Thread.sleep(2000);
-             */
-        }
+                } return 0;})
+                    .reduce(0,(sum, value)-> sum + value);
+            System.out.println("Total num of files inserted: " + totalFileNum);
 
+             */
+            System.out.println("-------------------------Sleep----------------------");
+            Thread.sleep(timeout);
+        }
+        System.in.read();
+        stopwatch.stop();
+        stopwatch.reset();
+    }
+    private void upsertBatches(String databaseName, String collectionName) throws Exception{
+        Document doc = DocumentBuilder.getDocFromJson("d2.json");
+        failure = 0;
+        batchCount = 0;
+
+        stopwatch.start();
+        System.out.println("---------------upsert------------------");
+        for (int b = 0; b < batchPerThread;b++) {
+            for (int i = 0; i < threadNum; i++) {
+                int batchNum = i + b * threadNum;
+                ArrayList<Document> docs = new DocumentBuilder(batchSize, batchNum, doc).docDefinitions;
+
+                Runnable r = () -> {
+                    try {
+                        upsertDocuments(databaseName, collectionName, docs);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                };
+                executorService.execute(r);
+            }
+            System.out.println("-------------------------Sleep----------------------");
+            Thread.sleep(timeout);
+        }
         System.in.read();
         stopwatch.stop();
     }
 
+    private void changeContainerThroughput(DocumentCollection collection, int throughput) throws DocumentClientException {
+        String collectionResourceId = collection.getResourceId();
+        Iterator<Offer> it = client.queryOffers(
+                String.format("SELECT * FROM r where r.offerResourceId = '%s'", collectionResourceId), null).getQueryIterator();
+        Offer offer = it.next();
+        // update the offer
+        offer.getContent().put("offerThroughput", throughput);
+        client.replaceOffer(offer);
+        System.out.println(offer.getContent().getInt("offerThroughput"));
+
+    }
     private void close()
     {
         executorService.shutdown();

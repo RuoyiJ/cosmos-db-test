@@ -1,6 +1,8 @@
 import com.google.common.base.Stopwatch;
 import com.microsoft.azure.documentdb.Document;
 import com.microsoft.azure.documentdb.DocumentClient;
+import com.microsoft.azure.documentdb.PartitionKey;
+import com.microsoft.azure.documentdb.RequestOptions;
 import com.microsoft.azure.documentdb.ResourceResponse;
 
 import javax.swing.*;
@@ -8,12 +10,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 
-public class InsertDocuments implements Callable<Long> {
+public class InsertDocuments implements Callable<Integer> {
 
     private String collectionLink;
     private DocumentClient client;
     private ArrayList<Document> docs;
-    private Stopwatch stopwatch = Stopwatch.createUnstarted();
 
     public InsertDocuments(){}
     public InsertDocuments(DocumentClient client, String collectionLink, ArrayList<Document> docs){
@@ -23,14 +24,17 @@ public class InsertDocuments implements Callable<Long> {
     }
 
     @Override
-    public Long call() throws Exception {
+    public Integer call() throws Exception {
 
-        stopwatch.start();
+        int fileInserted = 0;
         for (int i = 0;i<docs.size();i++) {
-            ResourceResponse response = client.createDocument(collectionLink,docs.get(i),null,true);
+            RequestOptions requestOptions = new RequestOptions();
+            PartitionKey partitionKey= new PartitionKey(docs.get(i).get("mid"));
+            requestOptions.setPartitionKey(partitionKey);
+            ResourceResponse response = client.createDocument(collectionLink,docs.get(i),requestOptions,true);
             //System.out.println(Thread.currentThread().getName() + " " + response.getResource().getId());
+            fileInserted++;
         }
-        stopwatch.stop();
-        return stopwatch.elapsed().toMillis();
+        return fileInserted;
     }
 }
